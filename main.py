@@ -27,7 +27,12 @@ def print_event(turn: int, name: str, args: dict, result: str) -> None:
         )
         return
     brief = {k: v for k, v in args.items() if k != "content"}
-    print(f"\n  [第 {turn} 轮] {name}({brief})")
+    # 长参数（如命令、文件内容）截断显示，完整内容已回传给模型
+    shown = {
+        k: (v[:60] + "...") if isinstance(v, str) and len(v) > 60 else v
+        for k, v in brief.items()
+    }
+    print(f"\n  [第 {turn} 轮] {name}({shown})")
     # 工具结果首行用于观察进展，完整结果已回传给模型
     first_line = result.splitlines()[0] if result else ""
     print(f"    -> {first_line}")
