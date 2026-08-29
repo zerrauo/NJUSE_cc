@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from agent.config import Config
 from agent.executor import ToolExecutor
-from agent.loop import AgentLoop
+from agent.loop import AgentLoop, generate_plan
 
 
 def make_resp(content=None, tool_calls=None):
@@ -143,3 +143,29 @@ def test_tool_runtime_error_fed_back_to_model(tmp_path):
     )
     result = agent._execute(bad_path)
     assert "越出工作区" in result
+
+
+def test_generate_plan_uses_no_tools(tmp_path):
+    llm = ScriptedLLM([make_resp(content="1. 创建文件\n2. 运行验证")])
+    agent = make_agent(tmp_path, llm)
+    plan = generate_plan(llm, "写个脚本")
+    assert plan.startswith("1.")
+    # 规划阶段不携带工具
+    assert llm.calls[-1][1] is None
+
+
+def test_run_with_plan_injects_plan_into_task(tmp_path):
+    plan = "1. 创建 a.py\n2. 运行验证"
+    llm = ScriptedLLM([make_resp(content="按计划完成")])
+    agent = make_agent(tmp_path, llm)
+    reply = agent.run("写个脚本", plan=plan)
+    assert reply == "按计划完成"
+    first_user = llm.calls[0][0][1]["content"]
+    assert "已确认的执行计划" in first_user and "1. 创建 a.py" in first_user
+
+
+def test_run_without_plan_keeps_task_plain(tmp_path):
+    llm = ScriptedLLM([make_resp(content="完成")])
+    agent = make_agent(tmp_path, llm)
+    agent.run("写个脚本")
+    assert llm.calls[0][0][1]["content"] == "写个脚本"

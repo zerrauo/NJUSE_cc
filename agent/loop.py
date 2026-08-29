@@ -15,6 +15,21 @@ from .tools import TOOL_SPECS, build_registry
 
 STUCK_WARN_THRESHOLD = 3
 
+PLAN_INSTRUCTION = """你是编程任务规划助手。请为下面的任务制定简洁的执行计划：
+- 分析任务涉及的现状（可基于任务描述推断，不要编造具体文件内容）；
+- 列出具体步骤：每步做什么、涉及哪些文件或命令、如何验证该步结果；
+- 只输出计划本身，编号列出，不要执行任何操作。"""
+
+
+def generate_plan(llm: "LLMClient", task: str) -> str:
+    """规划阶段：不携带工具，避免模型边规划边改文件。"""
+    messages = [
+        {"role": "system", "content": PLAN_INSTRUCTION},
+        {"role": "user", "content": task},
+    ]
+    resp = llm.chat(messages)
+    return resp.choices[0].message.content or ""
+
 
 class AgentLoop:
     def __init__(self, config: Config, llm: LLMClient, executor, on_event: Optional[Callable] = None):
@@ -46,10 +61,13 @@ class AgentLoop:
             return f"错误：工具执行异常（{type(e).__name__}: {e}），请分析原因并调整操作。"
         return str(result)
 
-    def run(self, task: str) -> str:
+    def run(self, task: str, plan: Optional[str] = None) -> str:
+        user_content = task
+        if plan:
+            user_content = f"{task}\n\n以下是用户已确认的执行计划，请按计划逐步执行：\n{plan}"
         messages: List[dict] = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": task},
+            {"role": "user", "content": user_content},
         ]
         last_call = None  # (工具名, 参数) 卡死检测
         repeat_count = 0

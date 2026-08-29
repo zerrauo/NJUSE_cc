@@ -5,6 +5,7 @@
 - 所有工具输出都有长度上限，避免单次输出撑爆上下文；
 - 工具失败不抛异常中断循环，而是返回错误文本，让模型自行修正。
 """
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,19 @@ DEFAULT_COMMAND_TIMEOUT = 120
 MAX_LIST_ENTRIES = 200
 
 IGNORED_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".idea", ".vscode"}
+
+# 危险命令黑名单：不可逆或影响共享状态的操作，执行前需要用户确认
+DANGEROUS_PATTERNS = [
+    r"\brm\s+-[a-z]*r[a-z]*\s+",  # rm -r / rm -rf 等递归删除
+    r"\bgit\s+reset\s+--hard",  # 丢弃未提交修改
+    r"\bgit\s+push\s+[^|&;]*(-f|--force)",  # 强推覆盖远端
+    r"\bgit\s+clean\s+-[a-z]*f",  # 删除未跟踪文件
+    r"\bsudo\b",
+    r"\bmkfs\b",
+    r"\bdd\s+if=",
+    r"\b(shutdown|reboot|halt|poweroff)\b",
+    r":\(\)\s*\{",  # fork bomb
+]
 
 
 class ToolExecutor:
@@ -27,6 +41,10 @@ class ToolExecutor:
         if not p.is_relative_to(self.workspace):
             raise ValueError(f"路径越出工作区，已拒绝: {path}")
         return p
+
+    @staticmethod
+    def is_dangerous(command: str) -> bool:
+        return any(re.search(pat, command) for pat in DANGEROUS_PATTERNS)
 
     @staticmethod
     def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
@@ -94,8 +112,9 @@ class ToolExecutor:
     # ---- 命令工具 ----
 
     def run_command(self, command: str, timeout: int = DEFAULT_COMMAND_TIMEOUT) -> str:
-        if self.confirm_command is not None and not self.confirm_command(command):
-            return "用户拒绝了该命令的执行。"
+        if self.is_dangerous(command) and self.confirm_command is not None:
+            if not self.confirm_command(command):
+                return "用户拒绝了该命令的执行。请改用更安全的替代方案。"
         try:
             proc = subprocess.run(
                 command,
