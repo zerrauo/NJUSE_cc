@@ -9,8 +9,11 @@ import json
 from typing import Callable, Dict, List, Optional
 
 from .config import Config
+from .context import ContextManager
 from .llm import LLMClient, SYSTEM_PROMPT
 from .tools import TOOL_SPECS, build_registry
+
+STUCK_WARN_THRESHOLD = 3
 
 
 class AgentLoop:
@@ -18,6 +21,7 @@ class AgentLoop:
         self.config = config
         self.llm = llm
         self.executor = executor
+        self.context = ContextManager(config)
         self.registry: Dict[str, Callable] = build_registry(executor)
         self.on_event = on_event or (lambda turn, name, args, result: None)
         self.history: List[dict] = []  # 完整对话记录，供上下文管理/调试使用
@@ -47,7 +51,18 @@ class AgentLoop:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": task},
         ]
+        last_call = None  # (工具名, 参数) 卡死检测
+        repeat_count = 0
         for turn in range(1, self.config.max_turns + 1):
+            before = len(messages)
+            messages = self.context.prepare(messages, self.llm)
+            if len(messages) < before:
+                self._emit(
+                    turn,
+                    "__summary__",
+                    {"压缩前消息数": before, "压缩后消息数": len(messages)},
+                    "历史已压缩为摘要",
+                )
             resp = self.llm.chat(messages, tools=TOOL_SPECS)
             msg = resp.choices[0].message
             if msg.tool_calls:
@@ -68,6 +83,22 @@ class AgentLoop:
                     messages.append(
                         {"role": "tool", "tool_call_id": tc.id, "content": result}
                     )
+                    # 连续重复同一调用说明模型陷入死循环，插入警告打破循环
+                    signature = (tc.function.name, json.dumps(args, sort_keys=True))
+                    if signature == last_call:
+                        repeat_count += 1
+                        if repeat_count == STUCK_WARN_THRESHOLD:
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": f"注意：你已连续 {repeat_count} 次调用相同的工具 "
+                                    f"{tc.function.name} 且参数未变。请仔细分析工具返回的错误信息，"
+                                    "调整策略（修改参数、换一种方式或检查你的假设），不要重复同样的调用。",
+                                }
+                            )
+                    else:
+                        last_call = signature
+                        repeat_count = 1
                 continue
             self.history = messages + [{"role": "assistant", "content": msg.content or ""}]
             return msg.content or ""

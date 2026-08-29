@@ -17,6 +17,12 @@ BANNER = "Mini Coding Agent — 输入任务开始，exit 退出"
 
 
 def print_event(turn: int, name: str, args: dict, result: str) -> None:
+    if name == "__summary__":
+        print(
+            f"\n  [上下文压缩] 消息 {args.get('压缩前消息数')} 条 → "
+            f"摘要 + 最近 {args.get('压缩后消息数')} 条"
+        )
+        return
     brief = {k: v for k, v in args.items() if k != "content"}
     print(f"\n  [第 {turn} 轮] {name}({brief})")
     # 工具结果首行用于观察进展，完整结果已回传给模型

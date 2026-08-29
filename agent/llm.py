@@ -55,3 +55,21 @@ class LLMClient:
                 delay = RETRY_BASE_DELAY * (2 ** attempt)
                 time.sleep(delay)
         raise RuntimeError("unreachable")
+
+    def summarize(self, messages: List[dict]) -> str:
+        """让模型压缩历史消息为进度摘要（不携带工具，避免摘要过程再触发工具）。"""
+        from .context import SUMMARY_INSTRUCTION
+
+        payload = [
+            {"role": "system", "content": SUMMARY_INSTRUCTION},
+            {
+                "role": "user",
+                "content": "\n\n".join(
+                    f"[{m.get('role')}] {m.get('content') or '(工具调用)'}"
+                    for m in messages
+                    if m.get("role") != "system"
+                ),
+            },
+        ]
+        resp = self.chat(payload)
+        return resp.choices[0].message.content or ""

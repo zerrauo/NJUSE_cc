@@ -23,6 +23,8 @@ class Config:
     model: str = "deepseek-chat"
     max_turns: int = 30
     workspace: Path = Path.cwd()
+    max_context_tokens: int = 48_000  # 达到该估算值前触发历史摘要压缩
+    keep_recent: int = 8  # 压缩时原样保留的最近消息条数
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -34,8 +36,18 @@ class Config:
                 "未找到 DEEPSEEK_API_KEY。请复制 .env.example 为 .env 并填入 key，"
                 "或通过环境变量提供。"
             )
+
+        def _int(name: str, default: int) -> int:
+            try:
+                return int(os.environ.get(name, default))
+            except ValueError:
+                return default
+
         return cls(
             api_key=api_key,
             base_url=os.environ.get("AGENT_BASE_URL", cls.base_url),
             model=os.environ.get("AGENT_MODEL", cls.model),
+            max_turns=_int("AGENT_MAX_TURNS", cls.max_turns),
+            max_context_tokens=_int("AGENT_MAX_CONTEXT", cls.max_context_tokens),
+            keep_recent=_int("AGENT_KEEP_RECENT", cls.keep_recent),
         )
