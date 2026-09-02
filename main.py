@@ -1,10 +1,11 @@
 """编程智能体入口。
 
 用法：
-  python main.py "任务描述" [--workspace 目录] [--plan]
-  python main.py [--workspace 目录] [--plan]   # 交互式逐条输入任务
+  python main.py "任务描述" [--workspace 目录] [--plan] [--readonly]
+  python main.py [--workspace 目录] [--plan] [--readonly]   # 交互式逐条输入任务
 
 --plan：先生成执行计划，用户确认后才开始执行工具。
+--readonly：只读模式，写文件工具不提供给模型（硬保证不修改文件）。
 """
 import argparse
 import sys
@@ -55,11 +56,11 @@ def confirm_plan() -> bool:
     return ans.strip().lower() in {"y", "yes"}
 
 
-def run_task(config: Config, llm: LLMClient, task: str, plan_mode: bool) -> None:
+def run_task(config: Config, llm: LLMClient, task: str, plan_mode: bool, readonly: bool) -> None:
     executor = ToolExecutor(workspace=config.workspace)
     executor.confirm_command = confirm_dangerous
-    loop = AgentLoop(config, llm, executor, on_event=print_event)
-    print(f"任务: {task}\n工作区: {config.workspace}")
+    loop = AgentLoop(config, llm, executor, on_event=print_event, readonly=readonly)
+    print(f"任务: {task}\n工作区: {config.workspace}{'（只读模式）' if readonly else ''}")
     plan: Optional[str] = None
     try:
         if plan_mode:
@@ -79,7 +80,7 @@ def run_task(config: Config, llm: LLMClient, task: str, plan_mode: bool) -> None
     print(f"\n{'=' * 60}\n{reply}")
 
 
-def run_repl(config: Config, llm: LLMClient, plan_mode: bool) -> None:
+def run_repl(config: Config, llm: LLMClient, plan_mode: bool, readonly: bool) -> None:
     print(BANNER)
     while True:
         try:
@@ -91,7 +92,7 @@ def run_repl(config: Config, llm: LLMClient, plan_mode: bool) -> None:
             break
         if not line.strip():
             continue
-        run_task(config, llm, line.strip(), plan_mode)
+        run_task(config, llm, line.strip(), plan_mode, readonly)
 
 
 def main() -> None:
@@ -99,6 +100,7 @@ def main() -> None:
     parser.add_argument("task", nargs="*", help="要完成的任务描述")
     parser.add_argument("--workspace", default=None, help="agent 的工作区目录，默认当前目录")
     parser.add_argument("--plan", action="store_true", help="先生成计划，用户确认后再执行")
+    parser.add_argument("--readonly", action="store_true", help="只读模式：不提供写文件工具")
     args = parser.parse_args()
 
     config = Config.from_env()
@@ -108,9 +110,9 @@ def main() -> None:
     llm = LLMClient(config)
     task = " ".join(args.task)
     if task:
-        run_task(config, llm, task, args.plan)
+        run_task(config, llm, task, args.plan, args.readonly)
     else:
-        run_repl(config, llm, args.plan)
+        run_repl(config, llm, args.plan, args.readonly)
 
 
 if __name__ == "__main__":

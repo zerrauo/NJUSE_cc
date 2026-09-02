@@ -1,7 +1,19 @@
 """工具定义：以 OpenAI function calling 格式声明工具，注册到本地执行器。"""
-from typing import Callable, Dict
+from typing import Callable, Dict, List
 
 from .executor import ToolExecutor
+
+# 只读模式下从工具列表中移除的写工具
+READONLY_BLOCKED_TOOLS = {"write_file", "edit_file"}
+
+
+def get_tool_specs(readonly: bool = False) -> List[dict]:
+    """只读模式直接不把写工具发给模型——模型无从发起写操作，是硬保证。"""
+    if not readonly:
+        return TOOL_SPECS
+    return [
+        s for s in TOOL_SPECS if s["function"]["name"] not in READONLY_BLOCKED_TOOLS
+    ]
 
 TOOL_SPECS = [
     {

@@ -49,11 +49,12 @@ class ScriptedLLM:
 
 
 def make_agent(tmp_path, llm, **kw):
+    readonly = kw.pop("readonly", False)
     defaults = dict(api_key="x", max_turns=10, max_context_tokens=100_000, keep_recent=4)
     defaults.update(kw)
     config = Config(**defaults)
     executor = ToolExecutor(workspace=tmp_path)
-    return AgentLoop(config, llm, executor)
+    return AgentLoop(config, llm, executor, readonly=readonly)
 
 
 def assert_no_orphan_tool(messages):
@@ -169,3 +170,36 @@ def test_run_without_plan_keeps_task_plain(tmp_path):
     agent = make_agent(tmp_path, llm)
     agent.run("写个脚本")
     assert llm.calls[0][0][1]["content"] == "写个脚本"
+
+
+def test_readonly_hides_write_tools(tmp_path):
+    llm = ScriptedLLM([make_resp(content="分析完成")])
+    agent = make_agent(tmp_path, llm, readonly=True)
+    agent.run("阅读代码")
+    tools = llm.calls[0][1]
+    names = [t["function"]["name"] for t in tools]
+    assert "read_file" in names and "list_files" in names and "run_command" in names
+    assert "write_file" not in names and "edit_file" not in names
+    # 系统提示词带有只读说明
+    assert "只读模式" in llm.calls[0][0][0]["content"]
+
+
+def test_readonly_blocks_write_execution(tmp_path):
+    agent = make_agent(tmp_path, ScriptedLLM([]), readonly=True)
+    write = SimpleNamespace(
+        id="call_x",
+        function=SimpleNamespace(
+            name="write_file", arguments=json.dumps({"path": "a.txt", "content": "x"})
+        ),
+    )
+    result = agent._execute(write)
+    assert "只读模式" in result
+    assert not (tmp_path / "a.txt").exists()
+
+
+def test_normal_mode_still_has_write_tools(tmp_path):
+    llm = ScriptedLLM([make_resp(content="完成")])
+    agent = make_agent(tmp_path, llm)
+    agent.run("写个脚本")
+    names = [t["function"]["name"] for t in llm.calls[0][1]]
+    assert "write_file" in names and "edit_file" in names

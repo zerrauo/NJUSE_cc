@@ -11,9 +11,14 @@ from typing import Callable, Dict, List, Optional
 from .config import Config
 from .context import ContextManager
 from .llm import LLMClient, SYSTEM_PROMPT
-from .tools import TOOL_SPECS, build_registry
+from .tools import READONLY_BLOCKED_TOOLS, build_registry, get_tool_specs
 
 STUCK_WARN_THRESHOLD = 3
+
+READONLY_PROMPT_SUFFIX = (
+    "\n\n当前为只读模式：你没有修改文件的工具，只能阅读文件与执行命令，"
+    "禁止任何写入或修改操作。"
+)
 
 PLAN_INSTRUCTION = """你是编程任务规划助手。请为下面的任务制定简洁的执行计划：
 - 分析任务涉及的现状（可基于任务描述推断，不要编造具体文件内容）；
@@ -32,12 +37,21 @@ def generate_plan(llm: "LLMClient", task: str) -> str:
 
 
 class AgentLoop:
-    def __init__(self, config: Config, llm: LLMClient, executor, on_event: Optional[Callable] = None):
+    def __init__(
+        self,
+        config: Config,
+        llm: LLMClient,
+        executor,
+        on_event: Optional[Callable] = None,
+        readonly: bool = False,
+    ):
         self.config = config
         self.llm = llm
         self.executor = executor
+        self.readonly = readonly
         self.context = ContextManager(config)
         self.registry: Dict[str, Callable] = build_registry(executor)
+        self.tool_specs = get_tool_specs(readonly)
         self.on_event = on_event or (lambda turn, name, args, result: None)
         self.history: List[dict] = []  # 完整对话记录，供上下文管理/调试使用
 
@@ -50,6 +64,8 @@ class AgentLoop:
             args = json.loads(tool_call.function.arguments or "{}")
         except json.JSONDecodeError:
             return "错误：工具参数不是合法 JSON，请重新生成参数。"
+        if self.readonly and name in READONLY_BLOCKED_TOOLS:
+            return "错误：当前是只读模式，不能修改文件。"
         handler = self.registry.get(name)
         if handler is None:
             return f"错误：未知工具 {name}，可用工具为 {sorted(self.registry)}"
@@ -65,8 +81,9 @@ class AgentLoop:
         user_content = task
         if plan:
             user_content = f"{task}\n\n以下是用户已确认的执行计划，请按计划逐步执行：\n{plan}"
+        system_prompt = SYSTEM_PROMPT + (READONLY_PROMPT_SUFFIX if self.readonly else "")
         messages: List[dict] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
         last_call = None  # (工具名, 参数) 卡死检测
@@ -81,7 +98,7 @@ class AgentLoop:
                     {"压缩前消息数": before, "压缩后消息数": len(messages)},
                     "历史已压缩为摘要",
                 )
-            resp = self.llm.chat(messages, tools=TOOL_SPECS)
+            resp = self.llm.chat(messages, tools=self.tool_specs)
             msg = resp.choices[0].message
             if msg.tool_calls:
                 messages.append(

@@ -10,6 +10,7 @@ cp .env.example .env   # 填入 DEEPSEEK_API_KEY
 python main.py "任务描述" --workspace <目录>   # 单次任务
 python main.py --workspace <目录>              # 交互式逐条输入
 python main.py --plan "任务描述"                # 先生成计划，确认后执行
+python main.py --readonly "任务描述"            # 只读模式：不提供写文件工具
 ```
 
 模型通过 OpenAI 兼容协议接入，默认 DeepSeek（`deepseek-chat`），改 `AGENT_BASE_URL` / `AGENT_MODEL` 可切换任意兼容网关。
@@ -38,12 +39,13 @@ python main.py --plan "任务描述"                # 先生成计划，确认�
 
 - **上下文自动摘要**：CJK 按字、其余按 4 字符估算 token，超过阈值时把旧历史交给模型压缩成进度摘要，保留最近消息；切口自动避开 tool 消息保证配对合法，摘要失败兜底为直接丢弃。
 - **Plan 模式**：`--plan` 时先由模型生成执行计划（规划阶段不携带工具），用户确认后计划注入任务上下文再执行。
+- **只读模式**：`--readonly` 时写文件工具根本不发给模型，是硬保证而非靠模型自觉，适合代码理解/审查类任务。
 - **危险命令确认**：`rm -r`、`git reset --hard`、`git push --force`、`sudo` 等黑名单命令执行前需用户确认；被拒绝时模型会自动改用更安全的替代方案。
 
 ## 测试
 
 ```bash
-python -m pytest tests/ -v   # 18 例：上下文边界、压缩触发、卡死检测、收尾、错误回传、危险命令等
+python -m pytest tests/ -v   # 21 例：上下文边界、压缩触发、卡死检测、收尾、错误回传、危险命令、只读模式等
 ```
 
 ## 目录结构
